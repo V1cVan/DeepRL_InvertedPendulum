@@ -1,4 +1,4 @@
 # DeepRL_InvertedPendulum
-Deep reinforcement learning continuous control inverted pendulum. 
+Reinforcement learning control of upright inverted pendulum. 
 
 Utilising OpenAI Gym (https://github.com/openai/gym)
