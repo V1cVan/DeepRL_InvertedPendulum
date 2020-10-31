@@ -4,7 +4,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-
+physical_devices = tf.config.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 import random
 
 def createModel(num_hidden, num_inputs, num_actions):
@@ -31,12 +32,11 @@ def trainModel(max_steps_per_episode, gamma, final_return, optimizer, loss_funct
         episode_reward = 0
         with tf.GradientTape() as tape:
             for timestep in range(1, max_steps_per_episode):
-                # env.render();  # Adding this line would show the attempts
+                # env.render(); Adding this line would show the attempts
                 # of the agent in a pop up window.
-                if episode_count%20==0:
-                    env.render()
-                state = tf.convert_to_tensor(state)  # array to tensorflow array
-                state = tf.expand_dims(state, 0)  # convert to [1,4] tensor
+
+                state = tf.convert_to_tensor(state)
+                state = tf.expand_dims(state, 0)
 
                 # Predict action probabilities and estimated future rewards
                 # from environment state
@@ -141,14 +141,14 @@ if __name__ == "__main__":
     # Configuration parameters for the whole setup
     seed = 42
     gamma_discount = 0.99  # Discount factor for past rewards
-    max_episode_steps = 50000  # Max time steps per run
-    final_return = 195  # Total return when model completed
+    max_episode_steps = 10000  # Max time steps per run
+    final_return = 200  # Total return when model completed
     env = CartPoleEnv()  # Create the environment
     env.seed(seed)
 
     num_inputs = 4  # (x,x_dot,theta,theta_dot)
     num_actions = 2  # (0,1)-(left,right)
-    num_hidden = 200 # number of hidden nodes in perceptron
+    num_hidden = 250  # number of hidden nodes in perceptron
     model = createModel(num_hidden, num_inputs, num_actions)
 
     optimizer_adam = keras.optimizers.Adam(learning_rate=0.02)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     loss_function = keras.losses.Huber()
 
     #finalModel = trainModel(max_episode_steps,gamma_discount,final_return,optimizer_adam,loss_function)
-    #finalModel.save_weights("./model_weights")
+    #finalModel.save_weights("./model/model_weights")
     model.load_weights("./model/model_weights")
 
     num_timesteps = 1000
