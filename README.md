@@ -1,4 +1,4 @@
-# DeepRL_InvertedPendulum
+# RL_InvertedPendulum
 Reinforcement learning control of upright inverted pendulum. 
 
 ![alt text](https://github.com/V1cVan/DeepRL_InvertedPendulum/blob/main/Pendulum.gif)
