@@ -138,7 +138,7 @@ def runSimulation(simulated_timesteps):
 
 
 if __name__ == "__main__":
-    # Configuration parameters for the whole setup
+    # Set configuration parameters for the whole setup
     seed = 42
     gamma_discount = 0.99  # Discount factor for past rewards
     max_episode_steps = 10000  # Max time steps per run
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     optimizer_RMSprop = keras.optimizers.RMSprop(learning_rate=0.01, momentum=0.01)
     loss_function = keras.losses.Huber()
 
-    #finalModel = trainModel(max_episode_steps,gamma_discount,final_return,optimizer_adam,loss_function)
+    finalModel = trainModel(max_episode_steps,gamma_discount,final_return,optimizer_adam,loss_function)
     #finalModel.save_weights("./model/model_weights")
     model.load_weights("./model/model_weights")
 
