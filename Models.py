@@ -60,17 +60,11 @@ class DQNetwork(keras.Model):
 
         inputs = layers.Input(shape=(num_inputs,))
 
-        # Actor net
-        dense_actor_1 = layers.Dense(num_hidden_1, activation=af)(inputs)
-        dense_actor_2 = layers.Dense(num_hidden_2, activation=af)(dense_actor_1)
-        actor = layers.Dense(num_outputs, activation="softmax")(dense_actor_2)
+        dense_1 = layers.Dense(num_hidden_1, activation=af)(inputs)
+        dense_2 = layers.Dense(num_hidden_2, activation=af)(dense_1)
+        output = layers.Dense(num_outputs)(dense_2)
 
-        # Critic net
-        dense_critic_1 = layers.Dense(num_hidden_1, activation=af)(inputs)
-        dense_critic_2 = layers.Dense(num_hidden_2, activation=af)(layers.concatenate([actor, dense_critic_1]))
-        critic = layers.Dense(1)(dense_critic_2)
-
-        self.model = keras.Model(inputs=inputs, outputs=[actor, critic], name="DQN_model")
+        self.model = keras.Model(inputs=inputs, outputs=output, name="DQN_model")
 
     def call(self, input_state):
         y = self.model(input_state)

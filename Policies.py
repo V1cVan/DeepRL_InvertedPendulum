@@ -16,8 +16,31 @@ class DqnTrainer(keras.models.Model):
         self.buffer = buffer
 
     def train_step(self):
+        with tf.GradientTape() as tape:
+            # Get minibatch of training examples
+            batch_size = self.training_param["batch_size"]
+            batch = self.buffer.get_training_samples(batch_size)
+            states_mb = np.squeeze(np.array([each[0] for each in batch], ndmin=3))
+            actions_mb = np.array([each[1] for each in batch])
+            rewards_mb = np.array([each[2] for each in batch])
+            next_states_mb = np.squeeze(np.array([each[3] for each in batch], ndmin=3))
 
-        return None
+            pred_Q = self.model(next_states_mb)
+            target_output = rewards_mb + self.training_param["gamma"]*np.max(pred_Q, axis=1)
+
+            curr_Q = self.model(states_mb)
+            actual_actions = []
+            for i in range(batch_size):
+                actual_actions.append(curr_Q[i, actions_mb[i]])
+            actual_output = tf.convert_to_tensor(actual_actions)
+
+            losses = target_output - actual_output
+            loss_value = sum(losses)
+
+            grads = tape.gradient(loss_value, self.model.trainable_variables)
+
+            self.training_param["optimiser"].apply_gradients(zip(grads, self.model.trainable_variables))
+
 
 
 class SpgTrainer(keras.models.Model):
@@ -30,6 +53,7 @@ class SpgTrainer(keras.models.Model):
         self.buffer = buffer
 
     def train_step(self):
+        # TODO implement uniform sampling from training buffer like done in DQN
         with tf.GradientTape() as tape:
             # Calculate expected value from rewards
             # - At each timestep what was the total reward received after that timestep

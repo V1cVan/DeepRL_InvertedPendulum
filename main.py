@@ -2,13 +2,13 @@ import os
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # specify which GPU(s) to be used
 
-from CartPole import CartPoleEnv # CartPoleEnv has been modified to make it more difficult.
+from CartPole import CartPoleEnv  # CartPoleEnv has been modified to make it more difficult.
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-tf.config.experimental.set_visible_devices([], "GPU")
+# tf.config.experimental.set_visible_devices([], "GPU")
 
 from Policies import *
 from Logging import *
@@ -21,7 +21,7 @@ class Main(object):
         self.data_logger = data_logger
         self.buffer = buffer
 
-    def train(self):
+    def train_SPG(self):
         rewards_history = []
         running_reward_history = []
         running_reward = 0
@@ -100,6 +100,88 @@ class Main(object):
                 self.trainer.model.save_weights(file_loc)
                 break
 
+    def pre_train(self):
+        # Fill training buffer with experiences to start training
+        max_timesteps = self.trainer.training_param["max_timesteps"]
+        while len(self.buffer.buffer) < self.trainer.training_param["max_buffer_size"]:
+            self.env.reset()
+            action = self.env.action_space.sample()
+            state, reward, done, _ = self.env.step(action)
+            for t in range(max_timesteps):
+                action = self.env.action_space.sample()
+                next_state, reward, done, _ = self.env.step(action)
+                if done:
+                    next_state = np.zeros(np.shape(state))
+                    self.buffer.add_experience((state, action, reward, next_state))
+                    state = self.env.reset()
+                    break
+                else:
+                    self.buffer.add_experience((state, action, reward, next_state))
+                    state = next_state
+
+        return state
+
+    def train_DQN(self):
+        epsilon_start = self.trainer.training_param["epsilon_start"]
+        epsilon_stop = self.trainer.training_param["epsilon_end"]
+        decay = self.trainer.training_param["decay_rate"]
+
+        rewards_history = []
+        running_reward_history = []
+        running_reward = 0
+        episode_count = 0
+        max_timesteps = self.trainer.training_param["max_timesteps"]
+
+        # Run until all episodes completed (reward level reached)
+        state = self.pre_train()
+
+        while True:
+            episode_reward = 0
+            self.data_logger.episode = episode_count
+            for timestep in range(max_timesteps):
+                self.data_logger.timesteps.append(timestep)
+                if episode_count % 50 == 0:
+                    self.env.render()
+
+                explore_prob = epsilon_stop + (epsilon_start - epsilon_stop)*np.exp(-decay*timestep)
+                if explore_prob > np.random.rand():
+                    action = self.env.action_space.sample()
+                else:
+                    action = np.argmax(self.trainer.model(state))
+
+                next_state, reward, done, _ = self.env.step(action)
+
+                episode_reward += reward
+
+                if not done:
+                    self.buffer.add_experience((state, action, reward, next_state))
+                    state = next_state
+                    self.trainer.train_step()
+                else:
+                    next_state = np.zeros(np.shape(state))
+                    self.buffer.add_experience((state, action, reward, next_state))
+                    self.env.reset()
+                    state, reward, done, _ = env.step(self.env.action_space.sample())
+                    self.trainer.train_step()
+                    break
+
+
+            # Update running reward to check condition for solving
+            running_reward = 0.05 * episode_reward + (1 - 0.05) * running_reward
+            running_reward_history.append(running_reward)
+
+            # Log details
+            episode_count += 1
+            if episode_count % 10 == 0:
+                template = "running reward: {:.2f} at episode {}"
+                print(template.format(running_reward, episode_count))
+
+            if running_reward >= 850 or episode_count >= self.trainer.training_param["max_num_episodes"]:
+                print("Solved at episode {}!".format(episode_count))
+                file_loc = self.trainer.model.model_params["weights_file_loc"]
+                self.trainer.model.save_weights(file_loc)
+                break
+
     def runSimulation(self, simulated_timesteps):
         state = env.reset()
         for _ in range(simulated_timesteps):
@@ -129,6 +211,10 @@ if __name__ == "__main__":
         "max_timesteps": 1000,
         "max_num_episodes": 1000,
         "max_buffer_size": 10000,
+        "batch_size": 300,
+        "epsilon_start": 1.0,
+        "epsilon_end": 0.01,
+        "decay_rate": 1e-4,
         "optimiser": keras.optimizers.Adam(learning_rate=0.001),
         "loss_func": keras.losses.Huber(),
     }
@@ -154,8 +240,13 @@ if __name__ == "__main__":
     # SPG_network.display_model_overview()
     SPG_trainer = SpgTrainer(SPG_network, training_param, data_logger, buffer)
 
-    main = Main(env, SPG_trainer, data_logger, buffer)
+    DQN_network = DQNetwork(model_param)
+    DQN_trainer = DqnTrainer(DQN_network, training_param, data_logger, buffer)
 
-    main.train()
+    # main = Main(env, SPG_trainer, data_logger, buffer)
+    # main.train_SPG()
+
+    main = Main(env, DQN_trainer, data_logger, buffer)
+    main.train_DQN()
 
     main.runSimulation(1000)
