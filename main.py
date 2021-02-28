@@ -15,23 +15,50 @@ from Logging import *
 from Models import *
 
 class Main(object):
-    def __init__(self, env, trainer, data_logger, buffer):
+    def __init__(self, env, agent, data_logger, buffer):
         self.env = env
-        self.trainer = trainer
+        self.agent = agent
         self.data_logger = data_logger
         self.buffer = buffer
+
+    def fill_buffer(self):
+        # Fill training buffer with experiences to start training
+        batch_size = self.agent.training_param["batch_size"]
+        # while len(self.buffer.buffer) < self.agent.training_param["max_buffer_size"]:
+
+        state = self.env.reset()
+        state = tf.convert_to_tensor(state)
+        state = tf.expand_dims(state, 0)
+        for i in range(batch_size+1):
+            action = self.env.action_space.sample()
+            next_state, reward, done, _ = self.env.step(action)
+            next_state = tf.convert_to_tensor(next_state)
+            next_state = tf.expand_dims(next_state, 0)
+
+            if not done:
+                self.buffer.add_experience((state, action, reward, next_state))
+                state = next_state
+            else:
+                next_state = np.zeros(np.shape(state))
+                self.buffer.add_experience((state, action, reward, next_state))
+                state = self.env.reset()
+                state = tf.convert_to_tensor(state)
+    #             state = tf.expand_dims(state, 0)
+
+
+        return state
 
     def train_SPG(self):
         rewards_history = []
         running_reward_history = []
         running_reward = 0
         episode_count = 0
-        max_timesteps = self.trainer.training_param["max_timesteps"]
+        max_timesteps = self.agent.training_param["max_timesteps"]
         # Run until all episodes completed (reward level reached)
         plot_items = self.data_logger.init_training_plot()
         while True:
             # Set environment with random state array: X=(x,xdot,theta,theta_dot)
-            state = self.env.reset()
+            state = self.env.reset()  # TODO ensure this is in other repo!
             state = tf.convert_to_tensor(state)
             state = tf.expand_dims(state, 0)
             self.data_logger.states.append(state)
@@ -43,9 +70,10 @@ class Main(object):
                     self.env.render()
 
 
+                # TODO add get_action method to implement temperature
                 # Predict action probabilities and estimated future rewards
                 # from environment state
-                action_probs, critic_value = self.trainer.model(state)
+                action_probs, critic_value = self.agent.model(state)
                 # actor calculates the probabilities of outputs from the given state
                 # critic evaluates the action by computing the value function
 
@@ -55,7 +83,7 @@ class Main(object):
                 # Sample action from action probability distribution
                 # squeeze removes single-dimensional entries from array shape
                 # choose between 0 and 1 with the probabilities calculated from network
-                action = np.random.choice(self.trainer.model.model_params["num_outputs"],
+                action = np.random.choice(self.agent.model.model_params["num_outputs"],
                                           p=np.squeeze(action_probs))
                 self.data_logger.chosen_actions.append(action)
                 self.data_logger.chosen_action_log_prob.append(tf.math.log(action_probs[0, action]))
@@ -81,7 +109,7 @@ class Main(object):
             self.data_logger.chosen_action_log_prob = tf.squeeze(self.data_logger.chosen_action_log_prob)
             self.data_logger.critic = tf.squeeze(self.data_logger.critic)
 
-            self.trainer.train_step()
+            self.agent.train_batch()
             self.data_logger.add_episode_data()
             self.data_logger.clear_episode_data()
 
@@ -93,51 +121,26 @@ class Main(object):
 
 
 
-            if running_reward >= 850 or episode_count >= self.trainer.training_param["max_num_episodes"]:
+            if running_reward >= 850 or episode_count >= self.agent.training_param["max_num_episodes"]:
                 print("Solved at episode {}!".format(episode_count))
                 self.data_logger.plot_training_data(plot_items)
-                file_loc = self.trainer.model.model_params["weights_file_loc"]
-                self.trainer.model.save_weights(file_loc)
+                file_loc = self.agent.model.model_params["weights_file_loc"]
+                self.agent.model.save_weights(file_loc)
                 break
 
-    def fill_buffer(self):
-        # Fill training buffer with experiences to start training
-        batch_size = self.trainer.training_param["batch_size"]
-        # while len(self.buffer.buffer) < self.trainer.training_param["max_buffer_size"]:
 
-        state = self.env.reset()
-        state = tf.convert_to_tensor(state)
-        state = tf.expand_dims(state, 0)
-        for i in range(batch_size+1):
-            action = self.env.action_space.sample()
-            next_state, reward, done, _ = self.env.step(action)
-            next_state = tf.convert_to_tensor(next_state)
-            next_state = tf.expand_dims(next_state, 0)
-
-            if not done:
-                self.buffer.add_experience((state, action, reward, next_state))
-                state = next_state
-            else:
-                next_state = np.zeros(np.shape(state))
-                self.buffer.add_experience((state, action, reward, next_state))
-                state = self.env.reset()
-                state = tf.convert_to_tensor(state)
-                state = tf.expand_dims(state, 0)
-
-
-        return state
 
     def train_DQN(self):
-        epsilon_max = self.trainer.training_param["epsilon_max"]  # Exploration
-        epsilon_min = self.trainer.training_param["epsilon_min"]  # Exploitation
-        decay = self.trainer.training_param["decay_rate"]
-        explore_prob = np.linspace(epsilon_max, epsilon_min, self.trainer.training_param["max_num_episodes"])
+        epsilon_max = self.agent.training_param["epsilon_max"]  # Exploration
+        epsilon_min = self.agent.training_param["epsilon_min"]  # Exploitation
+        decay = self.agent.training_param["decay_rate"]
+        explore_prob = np.linspace(epsilon_max, epsilon_min, self.agent.training_param["max_num_episodes"])
 
         rewards_history = []
         running_reward_history = []
         running_reward = 0
         episode_count = 0
-        max_timesteps = self.trainer.training_param["max_timesteps"]
+        max_timesteps = self.agent.training_param["max_timesteps"]
 
         actions_taken = []
 
@@ -159,7 +162,7 @@ class Main(object):
                 if explore_prob[episode_count] > np.random.rand():
                     action = self.env.action_space.sample()
                 else:
-                    action = np.argmax(self.trainer.model(state))
+                    action = np.argmax(self.agent.model(state))
 
 
                 next_state, reward, done, _ = self.env.step(action)
@@ -172,7 +175,7 @@ class Main(object):
                     self.buffer.add_experience((state, action, reward, next_state))
                     state = next_state
                     if timestep % 5 == 0:
-                        self.trainer.train_step()
+                        self.agent.train_step()
                 else:
                     next_state = np.zeros(np.shape(state))
                     self.buffer.add_experience((state, action, reward, next_state))
@@ -180,7 +183,7 @@ class Main(object):
                     state = tf.convert_to_tensor(state)
                     state = tf.expand_dims(state, 0)
                     if timestep % 5 == 0:
-                        self.trainer.train_step()
+                        self.agent.train_step()
                     break
 
 
@@ -195,10 +198,10 @@ class Main(object):
                 template = "running reward: {:.2f} at episode {}"
                 print(template.format(running_reward, episode_count))
 
-            if running_reward >= 1000 or episode_count >= self.trainer.training_param["max_num_episodes"]:
+            if running_reward >= 1000 or episode_count >= self.agent.training_param["max_num_episodes"]:
                 print("Solved at episode {}!".format(episode_count))
-                file_loc = self.trainer.model.model_params["weights_file_loc"]
-                self.trainer.model.save_weights(file_loc)
+                file_loc = self.agent.model.model_params["weights_file_loc"]
+                self.agent.model.save_weights(file_loc)
                 break
 
     def runSimulation(self, simulated_timesteps):
@@ -208,10 +211,10 @@ class Main(object):
             state = tf.convert_to_tensor(state)
             state = tf.expand_dims(state, 0)
             # action to take based on model:
-            file_loc = self.trainer.model.model_params["weights_file_loc"]
-            self.trainer.model.load_weights(file_loc)
-            action_probabilities, critic_values = self.trainer.model(state)
-            action = np.random.choice(self.trainer.model.model_params["num_outputs"],
+            file_loc = self.agent.model.model_params["weights_file_loc"]
+            self.agent.model.load_weights(file_loc)
+            action_probabilities, critic_values = self.agent.model(state)
+            action = np.random.choice(self.agent.model.model_params["num_outputs"],
                                       p=np.squeeze(action_probabilities))
             # get observation from environment based on action taken:
             observation, reward, done, info = env.step(action)
@@ -229,6 +232,7 @@ if __name__ == "__main__":
         "gamma": 0.99,
         "max_timesteps": 1000,
         "max_num_episodes": 1000,
+        "use_replay_buffer": False,
         "max_buffer_size": 10000,
         "batch_size": 128,
         "epsilon_max": 1.0,
@@ -259,9 +263,9 @@ if __name__ == "__main__":
 
     SPG_network = SpgNetwork(model_param)
     # SPG_network.display_model_overview()
-    SPG_trainer = SpgTrainer(SPG_network, training_param, data_logger, buffer)
+    SPG_agent = SpgAgent(SPG_network, training_param, data_logger, buffer)
 
-    main = Main(env, SPG_trainer, data_logger, buffer)
+    main = Main(env, SPG_agent, data_logger, buffer)
     main.train_SPG()
 
     main.runSimulation(1000)
