@@ -44,8 +44,6 @@ class Main(object):
                 state = self.env.reset()
                 state = tf.convert_to_tensor(state)
     #             state = tf.expand_dims(state, 0)
-
-
         return state
 
     def train_SPG(self):
@@ -54,16 +52,27 @@ class Main(object):
         running_reward = 0
         episode_count = 0
         max_timesteps = self.agent.training_param["max_timesteps"]
-        # Run until all episodes completed (reward level reached)
+        use_buffer = self.agent.training_param["use_replay_buffer"]
         plot_items = self.data_logger.init_training_plot()
+
+        # Fill replay buffer before training
+        if use_buffer:
+            state = self.fill_buffer()  # TODO check fill buffer!
+            self.data_logger.states.append(state)  # TODO Ensure correction in other repo! !
+
+        # Run until all episodes completed (reward level reached)
         while True:
-            # Set environment with random state array: X=(x,xdot,theta,theta_dot)
-            state = self.env.reset()  # TODO ensure this is in other repo!
-            state = tf.convert_to_tensor(state)
-            state = tf.expand_dims(state, 0)
-            self.data_logger.states.append(state)
+            if not use_buffer:
+                # Set environment with random state array: X=(x,xdot,theta,theta_dot)
+                state = self.env.reset()  # TODO ensure this is in other repo!
+                state = tf.convert_to_tensor(state)
+                state = tf.expand_dims(state, 0)
+                self.data_logger.states.append(state)
+
             episode_reward = 0
             self.data_logger.episode = episode_count
+
+            # Loop through each timestep in the episode:
             for timestep in range(max_timesteps):
                 self.data_logger.timesteps.append(timestep)
                 if episode_count % 50 == 0:
@@ -90,15 +99,34 @@ class Main(object):
                 # log probabilities have better accuracy (better represent small probabilities)
 
                 # Apply the sampled action in our environment
-                state, reward, done, info = env.step(action)
-                state = tf.convert_to_tensor(state)
-                state = tf.expand_dims(state, 0)
-                self.data_logger.states.append(state)
+                next_state, reward, done, info = env.step(action)
+                next_state = tf.convert_to_tensor(next_state)
+                next_state = tf.expand_dims(next_state, 0)
+                self.data_logger.states.append(next_state)
                 self.data_logger.rewards.append(reward)
                 episode_reward += reward
 
-                if done:
-                    break
+                if use_buffer:
+                    if not done:
+                        # NB Action saved here is the action passed to the simulator env.
+                        self.buffer.add_experience((state, action, reward, next_state))
+                        state = next_state
+                        # if timestep % 5 == 0:  # TODO implement if you want to slow down training freq
+                        self.agent.train_step()
+                    else:
+                        next_state = np.zeros(np.shape(state))
+                        self.buffer.add_experience((state, action, reward, next_state))
+                        state = self.env.reset()
+                        state = tf.convert_to_tensor(state)
+                        state = tf.expand_dims(state, 0)
+                        # if timestep % 5 == 0:  # TODO implement if you want to slow down training freq
+                        self.agent.train_step()
+                        break
+                else:
+                    if done:
+                        break
+                    else:
+                        state = next_state
 
             # Update running reward to check condition for solving
             running_reward = 0.05 * episode_reward + (1 - 0.05) * running_reward
@@ -109,7 +137,8 @@ class Main(object):
             self.data_logger.chosen_action_log_prob = tf.squeeze(self.data_logger.chosen_action_log_prob)
             self.data_logger.critic = tf.squeeze(self.data_logger.critic)
 
-            self.agent.train_batch()
+            if not use_buffer:
+                self.agent.train_step()
             self.data_logger.add_episode_data()
             self.data_logger.clear_episode_data()
 
@@ -130,79 +159,79 @@ class Main(object):
 
 
 
-    def train_DQN(self):
-        epsilon_max = self.agent.training_param["epsilon_max"]  # Exploration
-        epsilon_min = self.agent.training_param["epsilon_min"]  # Exploitation
-        decay = self.agent.training_param["decay_rate"]
-        explore_prob = np.linspace(epsilon_max, epsilon_min, self.agent.training_param["max_num_episodes"])
-
-        rewards_history = []
-        running_reward_history = []
-        running_reward = 0
-        episode_count = 0
-        max_timesteps = self.agent.training_param["max_timesteps"]
-
-        actions_taken = []
-
-        # Run until all episodes completed (reward level reached)
-        state = self.fill_buffer()
-        decay_step = 0
-        while True:
-
-            episode_reward = 0
-
-            self.data_logger.episode = episode_count
-            for timestep in range(max_timesteps):
-                self.data_logger.timesteps.append(timestep)
-                if episode_count % 50 == 0 and episode_count != 0:
-                    self.env.render()
-
-
-                # explore_prob = epsilon_stop + (epsilon_start - epsilon_stop)*np.exp(-decay*decay_step)
-                if explore_prob[episode_count] > np.random.rand():
-                    action = self.env.action_space.sample()
-                else:
-                    action = np.argmax(self.agent.model(state))
-
-
-                next_state, reward, done, _ = self.env.step(action)
-                next_state = tf.convert_to_tensor(next_state)
-                next_state = tf.expand_dims(next_state, 0)
-
-                episode_reward += reward
-
-                if not done:
-                    self.buffer.add_experience((state, action, reward, next_state))
-                    state = next_state
-                    if timestep % 5 == 0:
-                        self.agent.train_step()
-                else:
-                    next_state = np.zeros(np.shape(state))
-                    self.buffer.add_experience((state, action, reward, next_state))
-                    state = self.env.reset()
-                    state = tf.convert_to_tensor(state)
-                    state = tf.expand_dims(state, 0)
-                    if timestep % 5 == 0:
-                        self.agent.train_step()
-                    break
-
-
-            # Update running reward to check condition for solving
-            running_reward = 0.05 * episode_reward + (1 - 0.05) * running_reward
-            running_reward_history.append(running_reward)
-
-            # Log details
-            episode_count += 1
-            decay_step += 1
-            if episode_count % 10 == 0:
-                template = "running reward: {:.2f} at episode {}"
-                print(template.format(running_reward, episode_count))
-
-            if running_reward >= 1000 or episode_count >= self.agent.training_param["max_num_episodes"]:
-                print("Solved at episode {}!".format(episode_count))
-                file_loc = self.agent.model.model_params["weights_file_loc"]
-                self.agent.model.save_weights(file_loc)
-                break
+    # def train_DQN(self):
+    #     epsilon_max = self.agent.training_param["epsilon_max"]  # Exploration
+    #     epsilon_min = self.agent.training_param["epsilon_min"]  # Exploitation
+    #     decay = self.agent.training_param["decay_rate"]
+    #     explore_prob = np.linspace(epsilon_max, epsilon_min, self.agent.training_param["max_num_episodes"])
+    #
+    #     rewards_history = []
+    #     running_reward_history = []
+    #     running_reward = 0
+    #     episode_count = 0
+    #     max_timesteps = self.agent.training_param["max_timesteps"]
+    #
+    #     actions_taken = []
+    #
+    #     # Run until all episodes completed (reward level reached)
+    #     state = self.fill_buffer()
+    #     decay_step = 0
+    #     while True:
+    #
+    #         episode_reward = 0
+    #
+    #         self.data_logger.episode = episode_count
+    #         for timestep in range(max_timesteps):
+    #             self.data_logger.timesteps.append(timestep)
+    #             if episode_count % 50 == 0 and episode_count != 0:
+    #                 self.env.render()
+    #
+    #
+    #             # explore_prob = epsilon_stop + (epsilon_start - epsilon_stop)*np.exp(-decay*decay_step)
+    #             if explore_prob[episode_count] > np.random.rand():
+    #                 action = self.env.action_space.sample()
+    #             else:
+    #                 action = np.argmax(self.agent.model(state))
+    #
+    #
+    #             next_state, reward, done, _ = self.env.step(action)
+    #             next_state = tf.convert_to_tensor(next_state)
+    #             next_state = tf.expand_dims(next_state, 0)
+    #
+    #             episode_reward += reward
+    #
+    #             if not done:
+    #                 self.buffer.add_experience((state, action, reward, next_state))
+    #                 state = next_state
+    #                 if timestep % 5 == 0:
+    #                     self.agent.train_step()
+    #             else:
+    #                 next_state = np.zeros(np.shape(state))
+    #                 self.buffer.add_experience((state, action, reward, next_state))
+    #                 state = self.env.reset()
+    #                 state = tf.convert_to_tensor(state)
+    #                 state = tf.expand_dims(state, 0)
+    #                 if timestep % 5 == 0:
+    #                     self.agent.train_step()
+    #                 break
+    #
+    #
+    #         # Update running reward to check condition for solving
+    #         running_reward = 0.05 * episode_reward + (1 - 0.05) * running_reward
+    #         running_reward_history.append(running_reward)
+    #
+    #         # Log details
+    #         episode_count += 1
+    #         decay_step += 1
+    #         if episode_count % 10 == 0:
+    #             template = "running reward: {:.2f} at episode {}"
+    #             print(template.format(running_reward, episode_count))
+    #
+    #         if running_reward >= 1000 or episode_count >= self.agent.training_param["max_num_episodes"]:
+    #             print("Solved at episode {}!".format(episode_count))
+    #             file_loc = self.agent.model.model_params["weights_file_loc"]
+    #             self.agent.model.save_weights(file_loc)
+    #             break
 
     def runSimulation(self, simulated_timesteps):
         state = env.reset()
@@ -235,9 +264,6 @@ if __name__ == "__main__":
         "use_replay_buffer": False,
         "max_buffer_size": 10000,
         "batch_size": 128,
-        "epsilon_max": 1.0,
-        "epsilon_min": 0.01,
-        "decay_rate": 1e-4,
         "optimiser": keras.optimizers.Adam(learning_rate=0.001),
         "loss_func": keras.losses.Huber(),
     }
@@ -249,7 +275,7 @@ if __name__ == "__main__":
         "num_neurons": [100, 100],
         "af": "relu",
         "weights_file_loc": "./model/model_weights",
-        "optimiser": keras.optimizers.Adam(learning_rate=0.01),
+        "optimiser": keras.optimizers.Adam(learning_rate=0.001),
         "loss_func": keras.losses.Huber()
     }
 

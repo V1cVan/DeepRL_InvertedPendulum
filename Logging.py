@@ -189,6 +189,7 @@ class TrainingBuffer(object):
         """
         self.buffer.append(experience)
 
+
     def get_training_samples(self, batch_size):
         index = np.random.choice(np.arange(len(self.buffer)),
                                  size=batch_size,
