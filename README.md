@@ -1,4 +1,4 @@
-# Stochastic Policy Gradient Inverted Pendulum
+# Stochastic Policy Gradient (SPG) Inverted Pendulum
 Reinforcement learning control of an inverted pendulum using a Stochastic Policy Gradient (SPG) method. 
 
 ![alt text](https://github.com/V1cVan/DeepRL_InvertedPendulum/blob/main/Pendulum.gif)
