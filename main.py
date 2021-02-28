@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-# tf.config.experimental.set_visible_devices([], "GPU")
+tf.config.experimental.set_visible_devices([], "GPU")
 
 from Policies import *
 from Logging import *
@@ -100,31 +100,38 @@ class Main(object):
                 self.trainer.model.save_weights(file_loc)
                 break
 
-    def pre_train(self):
+    def fill_buffer(self):
         # Fill training buffer with experiences to start training
-        max_timesteps = self.trainer.training_param["max_timesteps"]
-        while len(self.buffer.buffer) < self.trainer.training_param["max_buffer_size"]:
-            self.env.reset()
+        batch_size = self.trainer.training_param["batch_size"]
+        # while len(self.buffer.buffer) < self.trainer.training_param["max_buffer_size"]:
+
+        state = self.env.reset()
+        state = tf.convert_to_tensor(state)
+        state = tf.expand_dims(state, 0)
+        for i in range(batch_size+1):
             action = self.env.action_space.sample()
-            state, reward, done, _ = self.env.step(action)
-            for t in range(max_timesteps):
-                action = self.env.action_space.sample()
-                next_state, reward, done, _ = self.env.step(action)
-                if done:
-                    next_state = np.zeros(np.shape(state))
-                    self.buffer.add_experience((state, action, reward, next_state))
-                    state = self.env.reset()
-                    break
-                else:
-                    self.buffer.add_experience((state, action, reward, next_state))
-                    state = next_state
+            next_state, reward, done, _ = self.env.step(action)
+            next_state = tf.convert_to_tensor(next_state)
+            next_state = tf.expand_dims(next_state, 0)
+
+            if not done:
+                self.buffer.add_experience((state, action, reward, next_state))
+                state = next_state
+            else:
+                next_state = np.zeros(np.shape(state))
+                self.buffer.add_experience((state, action, reward, next_state))
+                state = self.env.reset()
+                state = tf.convert_to_tensor(state)
+                state = tf.expand_dims(state, 0)
+
 
         return state
 
     def train_DQN(self):
-        epsilon_start = self.trainer.training_param["epsilon_start"]
-        epsilon_stop = self.trainer.training_param["epsilon_end"]
+        epsilon_max = self.trainer.training_param["epsilon_max"]  # Exploration
+        epsilon_min = self.trainer.training_param["epsilon_min"]  # Exploitation
         decay = self.trainer.training_param["decay_rate"]
+        explore_prob = np.linspace(epsilon_max, epsilon_min, self.trainer.training_param["max_num_episodes"])
 
         rewards_history = []
         running_reward_history = []
@@ -132,37 +139,48 @@ class Main(object):
         episode_count = 0
         max_timesteps = self.trainer.training_param["max_timesteps"]
 
-        # Run until all episodes completed (reward level reached)
-        state = self.pre_train()
+        actions_taken = []
 
+        # Run until all episodes completed (reward level reached)
+        state = self.fill_buffer()
+        decay_step = 0
         while True:
+
             episode_reward = 0
+
             self.data_logger.episode = episode_count
             for timestep in range(max_timesteps):
                 self.data_logger.timesteps.append(timestep)
-                if episode_count % 50 == 0:
+                if episode_count % 50 == 0 and episode_count != 0:
                     self.env.render()
 
-                explore_prob = epsilon_stop + (epsilon_start - epsilon_stop)*np.exp(-decay*timestep)
-                if explore_prob > np.random.rand():
+
+                # explore_prob = epsilon_stop + (epsilon_start - epsilon_stop)*np.exp(-decay*decay_step)
+                if explore_prob[episode_count] > np.random.rand():
                     action = self.env.action_space.sample()
                 else:
                     action = np.argmax(self.trainer.model(state))
 
+
                 next_state, reward, done, _ = self.env.step(action)
+                next_state = tf.convert_to_tensor(next_state)
+                next_state = tf.expand_dims(next_state, 0)
 
                 episode_reward += reward
 
                 if not done:
                     self.buffer.add_experience((state, action, reward, next_state))
                     state = next_state
-                    self.trainer.train_step()
+                    if timestep % 5 == 0:
+                        self.trainer.train_step()
                 else:
                     next_state = np.zeros(np.shape(state))
                     self.buffer.add_experience((state, action, reward, next_state))
-                    self.env.reset()
-                    state, reward, done, _ = env.step(self.env.action_space.sample())
-                    self.trainer.train_step()
+                    state = self.env.reset()
+                    state = tf.convert_to_tensor(state)
+                    state = tf.expand_dims(state, 0)
+                    if timestep % 5 == 0:
+                        self.trainer.train_step()
                     break
 
 
@@ -172,11 +190,12 @@ class Main(object):
 
             # Log details
             episode_count += 1
+            decay_step += 1
             if episode_count % 10 == 0:
                 template = "running reward: {:.2f} at episode {}"
                 print(template.format(running_reward, episode_count))
 
-            if running_reward >= 850 or episode_count >= self.trainer.training_param["max_num_episodes"]:
+            if running_reward >= 1000 or episode_count >= self.trainer.training_param["max_num_episodes"]:
                 print("Solved at episode {}!".format(episode_count))
                 file_loc = self.trainer.model.model_params["weights_file_loc"]
                 self.trainer.model.save_weights(file_loc)
@@ -211,9 +230,9 @@ if __name__ == "__main__":
         "max_timesteps": 1000,
         "max_num_episodes": 1000,
         "max_buffer_size": 10000,
-        "batch_size": 300,
-        "epsilon_start": 1.0,
-        "epsilon_end": 0.01,
+        "batch_size": 128,
+        "epsilon_max": 1.0,
+        "epsilon_min": 0.01,
         "decay_rate": 1e-4,
         "optimiser": keras.optimizers.Adam(learning_rate=0.001),
         "loss_func": keras.losses.Huber(),
@@ -225,7 +244,9 @@ if __name__ == "__main__":
         "num_outputs": 2,
         "num_neurons": [100, 100],
         "af": "relu",
-        "weights_file_loc": "./model/model_weights"
+        "weights_file_loc": "./model/model_weights",
+        "optimiser": keras.optimizers.Adam(learning_rate=0.01),
+        "loss_func": keras.losses.Huber()
     }
 
     env = CartPoleEnv()  # Create the environment
@@ -240,13 +261,7 @@ if __name__ == "__main__":
     # SPG_network.display_model_overview()
     SPG_trainer = SpgTrainer(SPG_network, training_param, data_logger, buffer)
 
-    DQN_network = DQNetwork(model_param)
-    DQN_trainer = DqnTrainer(DQN_network, training_param, data_logger, buffer)
-
-    # main = Main(env, SPG_trainer, data_logger, buffer)
-    # main.train_SPG()
-
-    main = Main(env, DQN_trainer, data_logger, buffer)
-    main.train_DQN()
+    main = Main(env, SPG_trainer, data_logger, buffer)
+    main.train_SPG()
 
     main.runSimulation(1000)
