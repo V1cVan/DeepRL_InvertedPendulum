@@ -52,8 +52,12 @@ class Main(object):
         running_reward = 0
         episode_count = 0
         max_timesteps = self.agent.training_param["max_timesteps"]
+        max_episodes = self.agent.training_param["max_num_episodes"]
         use_buffer = self.agent.training_param["use_replay_buffer"]
         plot_items = self.data_logger.init_training_plot()
+
+        # Controls exploration vs exploitation
+        temperatures = np.linspace(training_param["init_temperature"], 1, max_episodes)
 
         # Fill replay buffer before training
         if use_buffer:
@@ -62,6 +66,7 @@ class Main(object):
 
         # Run until all episodes completed (reward level reached)
         while True:
+            self.agent.temperature = temperatures[episode_count - 1]
             if not use_buffer:
                 # Set environment with random state array: X=(x,xdot,theta,theta_dot)
                 state = self.env.reset()  # TODO ensure this is in other repo!
@@ -88,6 +93,10 @@ class Main(object):
 
                 self.data_logger.actions.append(action_probs)
                 self.data_logger.critic.append(critic_value[0, 0])
+
+                if self.agent.training_param["use_temperature"]:
+                    action_log_probs = np.log(action_probs) / temperatures[episode_count]
+                    action_probs = np.exp(action_log_probs) / np.sum(np.exp(action_log_probs))
 
                 # Sample action from action probability distribution
                 # squeeze removes single-dimensional entries from array shape
@@ -261,10 +270,12 @@ if __name__ == "__main__":
         "gamma": 0.99,
         "max_timesteps": 1000,
         "max_num_episodes": 1000,
-        "use_replay_buffer": False,
+        "use_replay_buffer": False,  # Not currently working
         "max_buffer_size": 10000,
         "batch_size": 128,
-        "optimiser": keras.optimizers.Adam(learning_rate=0.001),
+        "use_temperature": False,   # Not currently working
+        "init_temperature": 10,
+        "optimiser": keras.optimizers.Adam(learning_rate=0.0001),
         "loss_func": keras.losses.Huber(),
     }
 
@@ -275,7 +286,7 @@ if __name__ == "__main__":
         "num_neurons": [100, 100],
         "af": "relu",
         "weights_file_loc": "./model/model_weights",
-        "optimiser": keras.optimizers.Adam(learning_rate=0.001),
+        "optimiser": keras.optimizers.Adam(learning_rate=0.0001),
         "loss_func": keras.losses.Huber()
     }
 

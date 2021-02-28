@@ -13,7 +13,7 @@ class SpgAgent(keras.models.Model):
         self.training_param = training_param
         self.data_logger = data_logger
         self.buffer = buffer
-    
+        self.temperature = 1
 
     def train_step(self):
         """
@@ -51,6 +51,7 @@ class SpgAgent(keras.models.Model):
             for t in range(batch_size):
                 chosen_action_prob.append(action_probs[t, actions[t]])
             chosen_action_prob = tf.convert_to_tensor(chosen_action_prob)
+
             actor_log_prob = tf.math.log(chosen_action_prob)
 
             returns = []
