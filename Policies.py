@@ -23,7 +23,6 @@ class SpgAgent(keras.models.Model):
         batch_size = self.training_param["batch_size"]
         eps = np.finfo(np.float32).eps.item()  # Smallest number such that 1.0 + eps != 1.0
         gamma = self.training_param["gamma"]
-
         if use_buffer:
             # Sample mini-batch from memory
             batch = self.buffer.get_training_samples(batch_size)
@@ -35,8 +34,11 @@ class SpgAgent(keras.models.Model):
         else:
             # actions correspond to actions given to the simulator [0,1]
             timesteps, states, rewards, actions = self.data_logger.get_experience()
+            # order = np.random.randint(0, len(rewards), len(rewards))
+            # states = tf.convert_to_tensor(np.array(states)[order])
+            # actions = tf.convert_to_tensor(np.array(actions)[order])
+            # rewards = tf.convert_to_tensor(np.array(rewards)[order])
             batch_size = len(timesteps)
-
 
         with tf.GradientTape() as tape:
             # Calculate expected value from rewards
@@ -93,6 +95,7 @@ class SpgAgent(keras.models.Model):
             self.data_logger.gradients.append(grads)
             self.training_param["optimiser"].apply_gradients(zip(grads, self.model.trainable_variables))
             # Clear the loss and reward history
+
 
 
 

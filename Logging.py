@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import pandas as pd
 import numpy as np
 from collections import deque
+import tensorflow as tf
 
 
 class DataLogger(object):
@@ -41,6 +42,7 @@ class DataLogger(object):
         return output_dict
 
     def get_experience(self):
+
         return self.timesteps, \
                self.states, \
                self.rewards, \
@@ -182,6 +184,9 @@ class TrainingBuffer(object):
 
     def __init__(self, max_mem_size):
         self.buffer = deque(maxlen=max_mem_size)
+        self.states = deque(maxlen=max_mem_size)
+        self.actions = deque(maxlen=max_mem_size)
+        self.rewards = deque(maxlen=max_mem_size)
 
     def add_experience(self, experience):
         """
@@ -189,9 +194,18 @@ class TrainingBuffer(object):
         """
         self.buffer.append(experience)
 
-
     def get_training_samples(self, batch_size):
+
         index = np.random.choice(np.arange(len(self.buffer)),
                                  size=batch_size,
                                  replace=False)
-        return [self.buffer[i] for i in index]
+
+        batch = [self.buffer[i] for i in index]
+
+        # states = [self.states[i] for i in index]
+        # actions = [self.actions[i] for i in index]
+        # rewards = [self.rewards[i] for i in index]
+        # return states, actions, rewards
+        return batch
+
+

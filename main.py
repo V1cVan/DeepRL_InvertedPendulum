@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import random
 
 tf.config.experimental.set_visible_devices([], "GPU")
 
@@ -21,30 +22,30 @@ class Main(object):
         self.data_logger = data_logger
         self.buffer = buffer
 
-    def fill_buffer(self):
-        # Fill training buffer with experiences to start training
-        batch_size = self.agent.training_param["batch_size"]
-        # while len(self.buffer.buffer) < self.agent.training_param["max_buffer_size"]:
-
-        state = self.env.reset()
-        state = tf.convert_to_tensor(state)
-        state = tf.expand_dims(state, 0)
-        for i in range(batch_size+1):
-            action = self.env.action_space.sample()
-            next_state, reward, done, _ = self.env.step(action)
-            next_state = tf.convert_to_tensor(next_state)
-            next_state = tf.expand_dims(next_state, 0)
-
-            if not done:
-                self.buffer.add_experience((state, action, reward, next_state))
-                state = next_state
-            else:
-                next_state = np.zeros(np.shape(state))
-                self.buffer.add_experience((state, action, reward, next_state))
-                state = self.env.reset()
-                state = tf.convert_to_tensor(state)
-    #             state = tf.expand_dims(state, 0)
-        return state
+    # def fill_buffer(self):
+    #     # Fill training buffer with experiences to start training
+    #     batch_size = self.agent.training_param["batch_size"]
+    #     # while len(self.buffer.buffer) < self.agent.training_param["max_buffer_size"]:
+    #
+    #     state = self.env.reset()
+    #     state = tf.convert_to_tensor(state)
+    #     state = tf.expand_dims(state, 0)
+    #     for i in range(batch_size+1):
+    #         action = self.env.action_space.sample()
+    #         next_state, reward, done, _ = self.env.step(action)
+    #         next_state = tf.convert_to_tensor(next_state)
+    #         next_state = tf.expand_dims(next_state, 0)
+    #
+    #         if not done:
+    #             self.buffer.add_experience((state, action, reward, next_state))
+    #             state = next_state
+    #         else:
+    #             next_state = np.zeros(np.shape(state))
+    #             self.buffer.add_experience((state, action, reward, next_state))
+    #             state = self.env.reset()
+    #             state = tf.convert_to_tensor(state)
+    # #             state = tf.expand_dims(state, 0)
+    #     return state
 
     def train_SPG(self):
         rewards_history = []
@@ -54,31 +55,37 @@ class Main(object):
         max_timesteps = self.agent.training_param["max_timesteps"]
         max_episodes = self.agent.training_param["max_num_episodes"]
         use_buffer = self.agent.training_param["use_replay_buffer"]
+        batch_size = self.agent.training_param["batch_size"]
         plot_items = self.data_logger.init_training_plot()
 
         # Controls exploration vs exploitation
         temperatures = np.linspace(training_param["init_temperature"], 1, max_episodes)
+        temperatures = np.ones((max_episodes,1))
 
         # Fill replay buffer before training
-        if use_buffer:
-            state = self.fill_buffer()  # TODO check fill buffer!
-            self.data_logger.states.append(state)  # TODO Ensure correction in other repo! !
+        # if use_buffer:
+        #     state = self.fill_buffer()  # TODO check fill buffer!
+        #     self.data_logger.states.append(state)  # TODO Ensure correction in other repo! !
 
         # Run until all episodes completed (reward level reached)
+
         while True:
             self.agent.temperature = temperatures[episode_count - 1]
-            if not use_buffer:
-                # Set environment with random state array: X=(x,xdot,theta,theta_dot)
-                state = self.env.reset()  # TODO ensure this is in other repo!
-                state = tf.convert_to_tensor(state)
-                state = tf.expand_dims(state, 0)
-                self.data_logger.states.append(state)
+            # if not use_buffer:
+            # Set environment with random state array: X=(x,xdot,theta,theta_dot)
+            state = self.env.reset()  # TODO ensure this is in other repo!
+            state = tf.convert_to_tensor(state)
+            state = tf.expand_dims(state, 0)
+
 
             episode_reward = 0
             self.data_logger.episode = episode_count
 
             # Loop through each timestep in the episode:
             for timestep in range(max_timesteps):
+                self.data_logger.states.append(state)
+                self.buffer.states.append(state)
+
                 self.data_logger.timesteps.append(timestep)
                 if episode_count % 50 == 0:
                     self.env.render()
@@ -103,33 +110,34 @@ class Main(object):
                 # choose between 0 and 1 with the probabilities calculated from network
                 action = np.random.choice(self.agent.model.model_params["num_outputs"],
                                           p=np.squeeze(action_probs))
+
                 self.data_logger.chosen_actions.append(action)
                 self.data_logger.chosen_action_log_prob.append(tf.math.log(action_probs[0, action]))
                 # log probabilities have better accuracy (better represent small probabilities)
+                self.buffer.actions.append(action)
 
                 # Apply the sampled action in our environment
                 next_state, reward, done, info = env.step(action)
                 next_state = tf.convert_to_tensor(next_state)
                 next_state = tf.expand_dims(next_state, 0)
-                self.data_logger.states.append(next_state)
+                # self.data_logger.states.append(next_state)
+                # self.buffer.states.append(next_state)
                 self.data_logger.rewards.append(reward)
+                self.buffer.rewards.append(reward)
                 episode_reward += reward
 
+
+                self.buffer.add_experience((state, action, reward, next_state))
                 if use_buffer:
+
                     if not done:
                         # NB Action saved here is the action passed to the simulator env.
-                        self.buffer.add_experience((state, action, reward, next_state))
                         state = next_state
-                        # if timestep % 5 == 0:  # TODO implement if you want to slow down training freq
-                        self.agent.train_step()
+                        if timestep % 5 == 0 and len(self.buffer.buffer) > batch_size:  # TODO implement if you want to slow down training freq
+                            self.agent.train_step()
                     else:
-                        next_state = np.zeros(np.shape(state))
-                        self.buffer.add_experience((state, action, reward, next_state))
-                        state = self.env.reset()
-                        state = tf.convert_to_tensor(state)
-                        state = tf.expand_dims(state, 0)
-                        # if timestep % 5 == 0:  # TODO implement if you want to slow down training freq
-                        self.agent.train_step()
+                        if timestep % 5 == 0 and len(self.buffer.buffer) > batch_size:  # TODO implement if you want to slow down training freq
+                            self.agent.train_step()
                         break
                 else:
                     if done:
@@ -156,10 +164,10 @@ class Main(object):
             if episode_count % 10 == 0:
                 template = "running reward: {:.2f} at episode {}"
                 print(template.format(running_reward, episode_count))
+                # self.data_logger.plot_training_data(plot_items)
 
 
-
-            if running_reward >= 850 or episode_count >= self.agent.training_param["max_num_episodes"]:
+            if running_reward >= 800 or episode_count >= self.agent.training_param["max_num_episodes"]:
                 print("Solved at episode {}!".format(episode_count))
                 self.data_logger.plot_training_data(plot_items)
                 file_loc = self.agent.model.model_params["weights_file_loc"]
@@ -269,13 +277,13 @@ if __name__ == "__main__":
         "seed": seed,
         "gamma": 0.99,
         "max_timesteps": 1000,
-        "max_num_episodes": 1000,
+        "max_num_episodes": 800,
         "use_replay_buffer": False,  # Not currently working
         "max_buffer_size": 10000,
-        "batch_size": 128,
+        "batch_size": 28,
         "use_temperature": False,   # Not currently working
         "init_temperature": 10,
-        "optimiser": keras.optimizers.Adam(learning_rate=0.0001),
+        "optimiser": keras.optimizers.Adam(learning_rate=0.001),
         "loss_func": keras.losses.Huber(),
     }
 
