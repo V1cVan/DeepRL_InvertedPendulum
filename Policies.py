@@ -1,44 +1,25 @@
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers
 import numpy as np
-from matplotlib import pyplot as plt
 tf.keras.backend.set_floatx('float64')
 
 class SpgAgent(keras.models.Model):
 
-    def __init__(self, SPG_network, training_param, data_logger, buffer):
+    def __init__(self, SPG_network, training_param, data_logger):
         super(SpgAgent, self).__init__()
         self.model = SPG_network
         self.training_param = training_param
         self.data_logger = data_logger
-        self.buffer = buffer
-        self.temperature = 1
 
     def train_step(self):
         """
         Train agent per episode if not using training replay buffer and per timestep if using the replay buffer.
         """
-        use_buffer = self.training_param["use_replay_buffer"]
-        batch_size = self.training_param["batch_size"]
         eps = np.finfo(np.float32).eps.item()  # Smallest number such that 1.0 + eps != 1.0
         gamma = self.training_param["gamma"]
-        if use_buffer:
-            # Sample mini-batch from memory
-            batch = self.buffer.get_training_samples(batch_size)
-            states = tf.squeeze(tf.convert_to_tensor([each[0] for each in batch]))
-            actions = tf.squeeze(tf.convert_to_tensor(np.array([each[1] for each in batch])))
-            rewards = tf.squeeze(tf.convert_to_tensor(np.array([each[2] for each in batch])))
-            next_states = tf.squeeze(tf.convert_to_tensor(np.array([each[3] for each in batch])))
-            # TODO check using states or next_states in other repo
-        else:
-            # actions correspond to actions given to the simulator [0,1]
-            timesteps, states, rewards, actions = self.data_logger.get_experience()
-            # order = np.random.randint(0, len(rewards), len(rewards))
-            # states = tf.convert_to_tensor(np.array(states)[order])
-            # actions = tf.convert_to_tensor(np.array(actions)[order])
-            # rewards = tf.convert_to_tensor(np.array(rewards)[order])
-            batch_size = len(timesteps)
+
+        # actions correspond to actions given to the simulator [0,1]
+        timesteps, states, rewards, actions = self.data_logger.get_experience()
 
         with tf.GradientTape() as tape:
             # Calculate expected value from rewards
@@ -50,7 +31,7 @@ class SpgAgent(keras.models.Model):
             action_probs, critic_value = self.model(states)
 
             chosen_action_prob = []
-            for t in range(batch_size):
+            for t in range(len(timesteps)):
                 chosen_action_prob.append(action_probs[t, actions[t]])
             chosen_action_prob = tf.convert_to_tensor(chosen_action_prob)
 

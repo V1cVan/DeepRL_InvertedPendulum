@@ -1,9 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.models import Sequential
-import numpy as np
-from matplotlib import pyplot as plt
 tf.keras.backend.set_floatx('float64')
 
 
